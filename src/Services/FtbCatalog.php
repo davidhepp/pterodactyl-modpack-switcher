@@ -13,7 +13,7 @@ use Throwable;
 class FtbCatalog
 {
     private const BASE = 'https://api.feed-the-beast.com/v1/modpacks/public/modpack';
-    private const AGENT = 'ModpackSwitcher/1.0 (Pterodactyl extension; author Dasky)';
+    private const AGENT = 'ModpackSwitcher/1.0 (Pterodactyl extension; author davidhepp)';
     private const CACHE_KEY = 'modpack-switcher:ftb:catalog:v1';
 
     public function packs(): array

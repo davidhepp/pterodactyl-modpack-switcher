@@ -13,7 +13,7 @@ class FtbRelease
     private function get(string $path): array
     {
         try {
-            $response = Http::withUserAgent('ModpackSwitcher/1.0 (Pterodactyl extension; author Dasky)')
+            $response = Http::withUserAgent('ModpackSwitcher/1.0 (Pterodactyl extension; author davidhepp)')
                 ->acceptJson()->withoutRedirecting()->connectTimeout(5)->timeout(20)
                 ->get('https://api.feed-the-beast.com/v1/modpacks/public/modpack/'.$path);
         } catch (ConnectionException) {

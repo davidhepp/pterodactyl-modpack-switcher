@@ -54,7 +54,7 @@ class CurrentPack
 
     private function publicGet(string $url): array
     {
-        $response = Http::withUserAgent('ModpackSwitcher/1.0 (Pterodactyl extension; author Dasky)')
+        $response = Http::withUserAgent('ModpackSwitcher/1.0 (Pterodactyl extension; author davidhepp)')
             ->acceptJson()->withoutRedirecting()->connectTimeout(3)->timeout(8)->get($url);
         abort_unless($response->successful() && is_array($response->json()), 502);
         return $response->json();
