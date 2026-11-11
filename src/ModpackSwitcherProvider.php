@@ -25,6 +25,12 @@ class ModpackSwitcherProvider extends ExtensionProvider
     public function boot(): void
     {
         $this->registerApiRoutes();
+        $this->app->extend(\Pterodactyl\Services\Servers\ServerInstallService::class, fn ($inner, $app) =>
+            new \ModpackSwitcher\Services\PreservingInstallService($inner, $app->make(\ModpackSwitcher\Services\ManagedInstallations::class), $app->make(\ModpackSwitcher\Services\FilePolicy::class))
+        );
+        $this->wrapAction(\Pterodactyl\Contracts\Servers\RecordsServerInstallResults::class, fn ($inner) =>
+            new \ModpackSwitcher\Services\CompleteInstallation($inner, $this->app->make(\ModpackSwitcher\Services\ManagedInstallations::class))
+        );
         $providers = ['modrinth' => 'Modrinth', 'ftb' => 'FTB', 'curseforge' => 'CurseForge'];
         $settings = [];
         foreach ($providers as $id => $name) {

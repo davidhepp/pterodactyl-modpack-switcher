@@ -13,3 +13,5 @@ Route::get('/curseforge/projects/{project}/versions', [\ModpackSwitcher\Http\Con
 Route::get('/ftb/search', [\ModpackSwitcher\Http\Controllers\FtbController::class, 'search']);
 
 Route::get('/ftb/projects/{project}/versions', [\ModpackSwitcher\Http\Controllers\FtbController::class, 'versions']);
+
+Route::get('/current', [InstallController::class, 'current']);

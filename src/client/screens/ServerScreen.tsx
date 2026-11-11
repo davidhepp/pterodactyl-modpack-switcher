@@ -4,7 +4,7 @@ import { Alert, Button, Input, Label, Select, ServerContentBlock, Spinner, Title
 import { PAGE_SIZE, searchModpacks, type Modpack, type Sort } from '../modrinth';
 
 import { minecraftVersionOptions } from '../minecraftVersions';
-import { getProviders } from '../installation';
+import { getProviders, getCurrentInstallation, type InstalledPack } from '../installation';
 import { searchFtb } from '../ftb';
 import { searchCurseForge } from '../curseforge';
 import PackSelectionModal from './PackSelectionModal';
@@ -25,6 +25,9 @@ function PackIcon({ pack }: { pack: Modpack }) {
 export default function ServerScreen() {
     const server = useCurrentServerRequired();
     const providers = useQuery({ queryKey: ['modpack-switcher', 'providers', server.attributes.uuid], queryFn: () => getProviders(server.attributes.uuid), retry: false });
+    const current = useQuery({ queryKey: ['modpack-switcher', 'current', server.attributes.uuid], queryFn: () => getCurrentInstallation(server.attributes.uuid), retry: false });
+    const [switching, setSwitching] = useState<InstalledPack | null>(null);
+    const installed = current.data?.installed;
     const [providerId, setProviderId] = useState('modrinth');
     const activeProvider = providers.data?.providers.find((provider) => provider.id === providerId);
     const providerName = providerId === 'ftb' ? 'FTB' : providerId === 'curseforge' ? 'CurseForge' : 'Modrinth';
@@ -50,11 +53,20 @@ export default function ServerScreen() {
     return (
         <ServerContentBlock title="Modpack Switcher">
             <div className="ms:space-y-6">
-                <div>
-                    <p className="ms:mb-2 ms:text-xs ms:font-semibold ms:uppercase ms:tracking-widest ms:text-muted-foreground">Modpack library</p>
-                    <h1 className="ms:text-2xl ms:font-semibold ms:text-foreground">Find your next modpack</h1>
-                    <p className="ms:mt-2 ms:text-sm ms:text-muted-foreground">Find and explore Minecraft modpacks from Modrinth, CurseForge, and FTB.</p>
-                </div>
+                {current.isError && <Alert type="warning">Could not load the current modpack.<Button.Text onClick={() => void current.refetch()}>Retry</Button.Text></Alert>}
+                {installed && <section aria-label="Current modpack" className="ms:rounded-xl ms:border ms:border-border ms:bg-card ms:p-5">
+                    <div className="ms:flex ms:flex-wrap ms:items-center ms:gap-4">
+                        <PackIcon pack={installed.pack} />
+                        <div className="ms:min-w-0 ms:flex-1">
+                            <p className="ms:text-xs ms:uppercase ms:tracking-wide ms:text-muted-foreground">Current modpack</p>
+                            <h2 className="ms:mt-1 ms:text-xl ms:font-semibold">{installed.pack.title}</h2>
+                            <p className="ms:mt-1 ms:text-sm ms:text-muted-foreground">{installed.provider === 'ftb' ? 'FTB' : installed.provider === 'curseforge' ? 'CurseForge' : 'Modrinth'} · {installed.version_name}</p>
+                            <p className="ms:mt-1 ms:text-xs ms:text-muted-foreground">{[installed.minecraft.length ? `Minecraft ${installed.minecraft.join(', ')}` : '', installed.loaders.join(', '), installed.java_label].filter(Boolean).join(' · ')}</p>
+                        </div>
+                        <Button disabled={!providers.data?.can_install || !providers.data?.providers.find((provider) => provider.id === installed.provider)?.egg_available || installed.skip_scripts || installed.status !== null} onClick={() => { setSelected(null); setSwitching(installed); }}>Switch version</Button>
+                    </div>
+                    {installed.status && <p className="ms:mt-3 ms:text-sm ms:text-destructive">Installation status: {installed.status.replaceAll('_', ' ')}</p>}
+                </section>}
                 <TitledGreyBox title="Browse modpacks">
                     <form className="ms:space-y-4" onSubmit={(event) => { event.preventDefault(); setQuery(input.trim()); setFilters({ minecraft: minecraftInput.trim(), loader: loaderInput }); setPage(0); }}>
                         <div className="ms:grid ms:gap-4 ms:sm:grid-cols-3">
@@ -109,6 +121,7 @@ export default function ServerScreen() {
                 {providers.isError && <Alert type="danger">Could not check provider eggs. Installation is unavailable.<Button.Text onClick={() => void providers.refetch()}>Retry provider check</Button.Text></Alert>}
                 {providers.data?.providers.filter((provider) => !provider.egg_available).map((provider) => <Alert key={provider.id} type="danger">{provider.name}: {provider.message}</Alert>)}
                 {providers.data && !providers.data.can_install && <Alert type="info">Only the server owner or an administrator may switch modpacks.</Alert>}
+                {switching && <PackSelectionModal key={`switch-${switching.provider}-${switching.version_id}`} pack={switching.pack} providerId={switching.provider} serverUuid={server.attributes.uuid} provider={providers.data?.providers.find((provider) => provider.id === switching.provider)} canInstall={providers.data?.can_install ?? false} mode="switch_version" currentVersionId={switching.version_id} currentJavaImage={switching.java_image} onClose={() => setSwitching(null)} />}
                 {selected && <PackSelectionModal key={`${providerId}-${selected.project_id}`} pack={selected} providerId={providerId as 'modrinth' | 'curseforge' | 'ftb'} serverUuid={server.attributes.uuid} provider={activeProvider} canInstall={providers.data?.can_install ?? false} onClose={() => setSelected(null)} />}
 
                 {results.isPending ? <div role="status" className="ms:flex ms:items-center ms:justify-center ms:gap-3 ms:py-12"><Spinner size="small" /> {providerId === 'ftb' ? 'Loading FTB catalog…' : 'Loading modpacks…'}</div>
@@ -131,7 +144,7 @@ export default function ServerScreen() {
                                         <div className="ms:flex ms:flex-wrap ms:gap-2">{pack.categories.slice(0, 4).map((category) => <span key={category} className="ms:rounded-md ms:bg-muted ms:px-2 ms:py-1 ms:text-xs ms:text-muted-foreground">{category}</span>)}</div>
                                         <div className="ms:mt-auto ms:flex ms:items-center ms:justify-between ms:gap-3 ms:pt-2">
                                             <span className="ms:text-xs ms:text-muted-foreground" title={`${pack.downloads.toLocaleString()} ${providerId === 'ftb' ? 'installs' : 'downloads'}`}>{number.format(pack.downloads)} {providerId === 'ftb' ? 'installs' : 'downloads'}</span>
-                                            <Button size="small" isSecondary={!active} aria-label={`Select ${pack.title}`} aria-pressed={active} onClick={() => setSelected(pack)}>{active ? 'Selected' : 'Select pack'}</Button>
+                                            <Button size="small" isSecondary={!active} aria-label={`Select ${pack.title}`} aria-pressed={active} onClick={() => { setSwitching(null); setSelected(pack); }}>{active ? 'Selected' : 'Select pack'}</Button>
                                         </div>
                                     </article>;
                                 })}

@@ -142,11 +142,29 @@ $request->setUserResolver(fn () => $owner);
 $controller = new InstallController();
 $managed = new class extends ModpackSwitcher\Services\ManagedInstallations {
     public ?string $name = null;
+    public ?array $operation = null;
+    public ?array $snapshot = null;
+    public function pending(Server $server): ?array { return $this->operation; }
+    public function installed(Server $server): ?array { return $this->snapshot; }
+    public function begin(Server $server, array $operation): void { $this->operation = $operation; }
+    public function complete(Server $server, bool $successful): void { if ($successful && $this->operation !== null) $this->snapshot = $this->operation['details']; $this->operation = null; }
     public function mark(Server $server, string $provider): void { $this->name = $provider; }
     public function provider(Server $server): ?string { return $this->name; }
 };
+$packState = new class extends ModpackSwitcher\Services\CurrentPack {
+    public ?array $config = null;
+    public function __construct() {}
+    public function configuration(Server $server): ?array { return $this->config; }
+    public function describe(string $provider, string $project, string $version): array { return ['provider' => $provider, 'project_id' => $project, 'version_id' => $version]; }
+};
+$policies = new ModpackSwitcher\Services\FilePolicy();
+$versionWrites = new ArrayObject();
+$versionWriter = new class($steps, $versionWrites) implements Pterodactyl\Contracts\Servers\UpdatesServerVariable {
+    public function __construct(private ArrayObject $steps, private ArrayObject $writes) {}
+    public function update(Server $server, int $variableId, string $value): void { $this->steps[] = 'version'; $this->writes[] = [$variableId, $value]; }
+};
 $unusedCfRelease = new ModpackSwitcher\Services\CurseForgeRelease(new ModpackSwitcher\Services\CurseForgeApi(new Pterodactyl\Services\Extensions\ExtensionSettingsRegistry()));
-$run = fn () => $controller->install($request, $server, $catalog, $release, $startup, $reinstall, $files, $variables, new StopServer(), $unusedCfRelease, $managed, new ModpackSwitcher\Services\FtbRelease());
+$run = fn () => $controller->install($request, $server, $catalog, $release, $startup, $reinstall, $files, $variables, new StopServer(), $unusedCfRelease, $managed, new ModpackSwitcher\Services\FtbRelease(), $packState, $policies, $versionWriter);
 $owner->id = 2;
 rejects($run, 403);
 $owner->id = 1;
@@ -241,14 +259,15 @@ rejects(fn () => $cfRelease->validate('285109', '123456'), 422);
 fakeCfRelease($clientFile, [...$serverFile, 'isAvailable' => false]);
 rejects(fn () => $cfRelease->validate('285109', '123456'), 422);
 fakeCfRelease($clientFile, $serverFile);
+$managed->complete($server, true);
 $server->status = null;
 $request->merge(['provider' => 'curseforge', 'project_id' => '285109', 'version_id' => '123456']);
 $before = count($steps);
 $keyDefinition->key = '';
-rejects(fn () => $controller->install($request, $server, $catalog, $release, $startup, $reinstall, $files, $variables, new StopServer(), $cfRelease, $managed, new ModpackSwitcher\Services\FtbRelease()), 422);
+rejects(fn () => $controller->install($request, $server, $catalog, $release, $startup, $reinstall, $files, $variables, new StopServer(), $cfRelease, $managed, new ModpackSwitcher\Services\FtbRelease(), $packState, $policies, $versionWriter), 422);
 check(count($steps) === $before, 'Missing key must not stop or modify the server');
 $keyDefinition->key = 'test-only-key';
-check($controller->install($request, $server, $catalog, $release, $startup, $reinstall, $files, $variables, new StopServer(), $cfRelease, $managed, new ModpackSwitcher\Services\FtbRelease())->getStatusCode() === 202, 'CurseForge installation rejected');
+check($controller->install($request, $server, $catalog, $release, $startup, $reinstall, $files, $variables, new StopServer(), $cfRelease, $managed, new ModpackSwitcher\Services\FtbRelease(), $packState, $policies, $versionWriter)->getStatusCode() === 202, 'CurseForge installation rejected');
 check($managed->name === 'curseforge', 'Managed provider marker missing');
 
 $server->egg_id = $egg->id;
@@ -346,9 +365,73 @@ rejects(fn () => $ftbRelease->validate('125', '9999'), 422);
 fakeFtbRelease($ftbPublicVersion, 999);
 rejects(fn () => $ftbRelease->validate('125', '9001'), 422);
 fakeFtbRelease($ftbPublicVersion);
+$managed->complete($server, true);
 $server->status = null;
 $request->merge(['provider' => 'ftb', 'project_id' => '125', 'version_id' => '9001']);
 $before = count($steps);
-check($controller->install($request, $server, $catalog, $release, $startup, $reinstall, $files, $variables, new StopServer(), $cfRelease, $managed, $ftbRelease)->getStatusCode() === 202, 'FTB installation rejected');
+check($controller->install($request, $server, $catalog, $release, $startup, $reinstall, $files, $variables, new StopServer(), $cfRelease, $managed, $ftbRelease, $packState, $policies, $versionWriter)->getStatusCode() === 202, 'FTB installation rejected');
 check($managed->name === 'ftb' && array_slice($steps->getArrayCopy(), $before) === ['startup', 'sync', 'wipe', 'reinstall'], 'FTB must use the shared clean install sequence');
 echo "PASS: FTB version selection, public release validation, manifest ownership, exact egg variables, and shared clean install.\n";
+
+// Version switches must preserve startup/image/egg and never use the wipe action
+// unless the user explicitly selected that policy.
+$managed->complete($server, true);
+$server->forceFill(['status' => null, 'egg_id' => $egg->id, 'image' => 'java:21', 'startup' => 'unchanged startup', 'skip_scripts' => false]);
+$versionVariable = new Pterodactyl\Models\EggVariable();
+$versionVariable->forceFill(['id' => 200, 'env_variable' => 'FTB_MODPACK_VERSION_ID', 'rules' => 'required|integer']);
+$egg->setRelation('variables', new Illuminate\Database\Eloquent\Collection([$versionVariable]));
+$packState->config = ['provider' => 'ftb', 'project_id' => '125', 'version_id' => '8000'];
+$request->request->remove('java_image');
+$request->request->remove('confirm_wipe');
+$request->merge(['mode' => 'switch_version', 'file_policy' => 'ftb_update', 'expected_version_id' => '8000']);
+fakeFtbRelease($ftbPublicVersion);
+$before = count($steps);
+check($controller->install($request, $server, $catalog, $release, $startup, $reinstall, $files, $variables, new StopServer(), $cfRelease, $managed, $ftbRelease, $packState, $policies, $versionWriter)->getStatusCode() === 202, 'FTB in-place update rejected');
+check(array_slice($steps->getArrayCopy(), $before) === ['version', 'sync', 'reinstall'], 'FTB update must only change its version and reinstall');
+check($versionWrites->getArrayCopy() === [[200, '9001']], 'Wrong version variable updated');
+check($server->image === 'java:21' && $server->startup === 'unchanged startup' && $server->egg_id === $egg->id, 'Version switching changed unrelated startup settings');
+$managed->complete($server, true);
+$server->status = null;
+$request->merge(['expected_version_id' => 'outdated']);
+$before = count($steps);
+rejects(fn () => $controller->install($request, $server, $catalog, $release, $startup, $reinstall, $files, $variables, new StopServer(), $cfRelease, $managed, $ftbRelease, $packState, $policies, $versionWriter), 409);
+check(count($steps) === $before, 'Stale version selection changed the server');
+$request->merge(['expected_version_id' => '8000', 'file_policy' => 'keep_world']);
+fakeFtbRelease($ftbPublicVersion);
+check($controller->install($request, $server, $catalog, $release, $startup, $reinstall, $files, $variables, new StopServer(), $cfRelease, $managed, $ftbRelease, $packState, $policies, $versionWriter)->getStatusCode() === 202, 'Preserving switch rejected');
+check($managed->operation['file_policy'] === 'keep_world', 'Preservation plan was not persisted');
+check(array_slice($steps->getArrayCopy(), $before) === ['version', 'sync', 'reinstall'], 'Preservation switch invoked whole-server wipe');
+
+// Execute the actual wrapper with a harmless fixture installer in /tmp only.
+$temp = sys_get_temp_dir().'/modpack-policy-test-'.bin2hex(random_bytes(6));
+mkdir($temp); mkdir($temp.'/world'); mkdir($temp.'/mods'); mkdir($temp.'/config');
+file_put_contents($temp.'/world/level.dat', 'my world');
+file_put_contents($temp.'/mods/old.jar', 'old mod');
+file_put_contents($temp.'/config/old.cfg', 'old config');
+file_put_contents($temp.'/server.properties', "level-name=world\nserver-port=25565\n");
+file_put_contents($temp.'/ops.json', '["original"]');
+file_put_contents($temp.'/unrelated.txt', 'keep');
+$plan = $policies->plan(['world', 'mods', 'config', 'server.properties', 'ops.json', 'unrelated.txt'], "level-name=world\n");
+$plan['stage'] = '.modpack-switcher-preserve-00000000-0000-4000-8000-000000000001';
+$fixtureInstaller = <<<'BASH'
+#!/bin/bash
+test -f world/level.dat || exit 20
+test ! -f mods/old.jar || exit 21
+mkdir -p mods config
+printf new > mods/new.jar
+printf replaced > server.properties
+printf replaced > ops.json
+BASH;
+$script = str_replace('ROOT=/mnt/server', 'ROOT='.escapeshellarg($temp), $policies->script($fixtureInstaller, $plan));
+file_put_contents($temp.'/test.sh', $script);
+exec('bash '.escapeshellarg($temp.'/test.sh').' 2>&1', $output, $result);
+check($result === 0 && file_get_contents($temp.'/world/level.dat') === 'my world', 'World was moved or lost during preservation');
+check(file_get_contents($temp.'/server.properties') === "level-name=world\nserver-port=25565\n" && file_get_contents($temp.'/ops.json') === '["original"]', 'Properties/player lists were overwritten');
+check(file_exists($temp.'/mods/new.jar') && ! file_exists($temp.'/mods/old.jar') && ! file_exists($temp.'/config/old.cfg') && file_get_contents($temp.'/unrelated.txt') === 'keep', 'Selective replacement touched unrelated data');
+$failureScript = str_replace('ROOT=/mnt/server', 'ROOT='.escapeshellarg($temp), $policies->script("#!/bin/bash\nprintf bad > server.properties\nexit 7\n", $plan));
+file_put_contents($temp.'/test.sh', $failureScript);
+exec('bash '.escapeshellarg($temp.'/test.sh').' 2>&1', $output, $result);
+check($result === 7 && file_get_contents($temp.'/server.properties') === "level-name=world\nserver-port=25565\n", 'Failed installer did not restore properties or preserve its exit code');
+rejects(fn () => $policies->plan(['mods'], "level-name=mods\n"), 422);
+exec('rm -rf -- '.escapeshellarg($temp));
+echo "PASS: version-only updates, stale-switch protection, selective file replacement, in-place worlds, and restoration after success/failure.\n";
