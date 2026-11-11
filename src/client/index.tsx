@@ -1,0 +1,11 @@
+import './styles.css';
+import { definePterodactylExtension } from '@pterodactyl/sdk';
+
+export default definePterodactylExtension({
+    setup({ screens }) {
+        screens.register('main', () => import('./screens/ServerScreen'));
+        // Declare paths, navigation, and permissions in extension.json ui.screens.
+        // Use slots.register('server.console.before', Component) for core anchors.
+        // Use forms.extend('admin.user', Component) to draw the fields the provider registers.
+    },
+});

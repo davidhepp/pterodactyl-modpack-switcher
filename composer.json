@@ -1,0 +1,11 @@
+{
+    "description": "Browse and install Minecraft modpacks on your server.",
+    "autoload": {
+        "psr-4": {
+            "ModpackSwitcher\\": "src/"
+        }
+    },
+    "config": {
+        "autoloader-suffix": "ModpackSwitcherExtension"
+    }
+}
