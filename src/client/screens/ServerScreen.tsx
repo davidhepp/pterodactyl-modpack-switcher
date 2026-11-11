@@ -57,20 +57,19 @@ export default function ServerScreen() {
                 </div>
                 <TitledGreyBox title="Browse modpacks">
                     <form className="ms:space-y-4" onSubmit={(event) => { event.preventDefault(); setQuery(input.trim()); setFilters({ minecraft: minecraftInput.trim(), loader: loaderInput }); setPage(0); }}>
-                        <div className="ms:flex ms:flex-col ms:gap-4 ms:sm:flex-row ms:sm:items-end">
-                            <div className="ms:w-full ms:sm:w-48">
+                        <div className="ms:grid ms:gap-4 ms:sm:grid-cols-3">
+                            <div className="ms:min-w-0">
                                 <Label htmlFor="ms-provider">Provider</Label>
                                 <Select id="ms-provider" value={providerId} onChange={(value) => { setProviderId(String(value)); setPage(0); setSelected(null); }} options={providers.data?.providers.map((provider) => ({
                                     value: provider.id,
-                                    label: <span className={provider.egg_available ? '' : 'ms:text-destructive'}>{provider.name}{!provider.egg_available ? ' — Egg unavailable' : ''}</span>,
+                                    label: <span className={`ms:block ms:py-1 ${provider.egg_available ? '' : 'ms:text-destructive'}`}>{provider.name}{!provider.egg_available ? ' — Egg unavailable' : ''}</span>,
                                     textLabel: provider.name,
                                 })) ?? [{ value: 'modrinth', label: 'Modrinth' }, { value: 'curseforge', label: 'CurseForge' }, { value: 'ftb', label: 'FTB' }]} />
                             </div>
-                            <div className="ms:min-w-0 ms:flex-1">
+                            <div className="ms:min-w-0 ms:sm:col-span-2">
                                 <Label htmlFor="ms-search">Search modpacks</Label>
                                 <Input id="ms-search" placeholder="Search adventure, technology, exploration…" value={input} maxLength={200} onChange={(event) => setInput(event.target.value)} />
                             </div>
-                            <Button type="submit">Search</Button>
                         </div>
                         <div className="ms:grid ms:gap-4 ms:sm:grid-cols-3">
                             <div>
@@ -99,7 +98,10 @@ export default function ServerScreen() {
                         </div>
                         <div className="ms:flex ms:flex-wrap ms:items-center ms:justify-between ms:gap-3 ms:text-xs ms:text-muted-foreground">
                             <span>Filters apply when you search.</span>
-                            <Button.Text onClick={() => { setInput(''); setQuery(''); setMinecraftInput(''); setLoaderInput(''); setFilters({ minecraft: '', loader: '' }); setSort('downloads'); setPage(0); }}>Reset filters</Button.Text>
+                            <div className="ms:flex ms:items-center ms:gap-2">
+                                <Button type="submit">Search</Button>
+                                <Button.Text onClick={() => { setInput(''); setQuery(''); setMinecraftInput(''); setLoaderInput(''); setFilters({ minecraft: '', loader: '' }); setSort('downloads'); setPage(0); }}>Reset filters</Button.Text>
+                            </div>
                         </div>
                     </form>
                 </TitledGreyBox>
